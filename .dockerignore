@@ -1,0 +1,13 @@
+.git
+.venv
+.dependencias
+.temporal
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+credenciales*
+test_quiz.py
+*.cmd
+*.ps1
