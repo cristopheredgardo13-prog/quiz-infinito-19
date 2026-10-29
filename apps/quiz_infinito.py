@@ -2,15 +2,12 @@
 import asyncio
 import json
 import os
-import uuid
 from pathlib import Path
 import flet as ft
-import flet_audio as fa
-import flet_audio_recorder as far
-import edge_tts
+from voz import crear_sesion
 from ia import ia
-from multimedia import ia_media, pcm_a_wav, preparar_imagen
-from logica import validar_entrada, validar_quiz, puntaje, demo, sensible, validar_audio_pcm, validar_transcripcion
+from multimedia import ia_media, preparar_imagen
+from logica import validar_entrada, validar_quiz, puntaje, demo, sensible
 
 CIAN = "#35E1E8"
 INSTRUCCION = """Eres un profesor paciente. Crea un quiz educativo de exactamente cinco preguntas,
@@ -23,8 +20,7 @@ Usa el historial para continuar temas o evitar repetir preguntas. No incluyas da
 def vista(page):
     # R7, R12 y R14: estado privado de esta sesión, nunca global.
     estado = dict(quiz=None, respuestas=[], historial=[], usos=0, positivos=0,
-                  negativos=0, voto=None, imagen=None, mime="", trozos=[], grabando=False,
-                  generacion_audio=0, exportacion="", ocupado=False, deteniendo=False)
+                  negativos=0, voto=None, imagen=None, mime="", exportacion="", ocupado=False)
     tema = ft.TextField(label="Tema o pregunta · máximo 500 caracteres", multiline=True, min_lines=2, max_lines=4,
                         hint_text="Ejemplo: redes informáticas")
     fuente = ft.TextField(label="Texto de estudio · hasta 12 000 caracteres", multiline=True, min_lines=3, max_lines=6)
@@ -43,8 +39,8 @@ def vista(page):
     selector = ft.FilePicker()
     portapapeles = ft.Clipboard()
     compartir_servicio = ft.Share()
-    reproductor = fa.Audio()
-    page.services.extend([selector, portapapeles, compartir_servicio, reproductor])
+    navegador = ft.UrlLauncher()
+    page.services.extend([selector, portapapeles, compartir_servicio, navegador])
 
     def mensaje(texto):
         aviso.value = texto
@@ -79,13 +75,20 @@ def vista(page):
         total = puntaje(preguntas, estado["respuestas"])
         if idx == 5:
             elogio = "¡Excelente!" if total >= 4 else "¡Buen avance!" if total >= 2 else "Practicar también es aprender."
-            resultados.controls.append(ft.Text(f"{elogio} Resultado: {total}/5 · {total * 20} %", size=23, color=CIAN))
+            resultados.controls.append(tarjeta([ft.Text("RETO COMPLETADO", color=CIAN), ft.Text(f"{total}/5 · {total * 20} %", size=38, weight=ft.FontWeight.BOLD), ft.Text(f"{elogio} {total} correctas · {5-total} para repasar", size=19), ft.Text("Revisa tus respuestas y aprende con cada explicación.", color="#B7C8DE")]))
             estado["exportacion"] = f"Quiz infinito · {tema.value or 'Demostración'}\nResultado: {total}/5 ({total * 20} %)\n"
             for i, p in enumerate(preguntas):
                 correcto = estado["respuestas"][i] == p["correcta"]
                 texto = f"{i+1}. {p['pregunta']}\nTu respuesta: {p['opciones'][estado['respuestas'][i]]}\nCorrecta: {p['opciones'][p['correcta']]}\n{p['explicacion']}"
                 estado["exportacion"] += texto + "\n\n"
-                resultados.controls.append(tarjeta([ft.Text(("✓ " if correcto else "✗ ") + texto, selectable=True)]))
+                resultados.controls.append(ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"{i+1:02d} · " + ("CORRECTA" if correcto else "POR REPASAR"), color="#65E4B0" if correcto else "#FFB5A5", weight=ft.FontWeight.BOLD),
+                        ft.Text(p["pregunta"], size=20, weight=ft.FontWeight.BOLD),
+                        ft.Text("Tu respuesta: " + p["opciones"][estado["respuestas"][i]], selectable=True),
+                        ft.Text("Respuesta correcta: " + p["opciones"][p["correcta"]], color="#65E4B0", selectable=True),
+                        ft.Text(p["explicacion"], color="#CBD7E8", selectable=True),
+                    ], spacing=10), bgcolor="#15352F" if correcto else "#38252E", padding=22, border_radius=18))
             if estado["historial"]:
                 estado["historial"][-1]["puntaje"] = f"{total}/5"
             refrescar_historial()
@@ -139,6 +142,8 @@ def vista(page):
             estado["historial"].append({"tema": etiqueta, "nivel": nivel.value,
                 "preguntas": [p["pregunta"] for p in datos["preguntas"]]})
             estado["historial"] = estado["historial"][-5:]
+            util.content, mejorable.content = "👍 Útil", "👎 Mejorable"
+            opinion.value = "¿Te ayudaron estas preguntas? Valora la calidad del quiz."
             refrescar_historial()
             dibujar()
             mensaje("Modo demostración: preguntas fijas, sin IA." if modo_demo.value else "Quiz generado. Elige una opción por pregunta.")
@@ -201,71 +206,14 @@ def vista(page):
         except Exception: mensaje("No pudimos leer la foto. Prueba con otra más clara.")
         finally: ocupado(False)
 
-    def recibir_audio(e):
-        if estado["grabando"] and sum(map(len, estado["trozos"])) < 1_000_000:
-            estado["trozos"].append(e.chunk)
-    grabadora = far.AudioRecorder(on_stream=recibir_audio)
-    page.services.append(grabadora)
-
-    async def limite_audio(numero):
-        await asyncio.sleep(30)
-        if estado["grabando"] and estado["generacion_audio"] == numero:
-            await parar_audio(None)
-
-    # R1: 30 segundos máximo, estados visibles y procesamiento fuera del hilo de interfaz.
     async def iniciar_audio(e):
-        if modo_demo.value: return mensaje("El dictado necesita IA real. Configura la clave y desactiva demostración.")
-        try:
-            if estado["grabando"]: return
-            if not await grabadora.has_permission():
-                return mensaje("Permite el micrófono. En celular usa el enlace HTTPS del Space.")
-            estado["trozos"] = []
-            estado["grabando"] = True
-            ok = await grabadora.start_recording(configuration=far.AudioRecorderConfiguration(
-                encoder=far.AudioEncoder.PCM16BITS, sample_rate=16000, channels=1))
-            if not ok: raise ValueError("No se inició el micrófono. Revisa el permiso y usa HTTPS.")
-            estado["generacion_audio"] += 1
-            ocupado(True)
-            detener.disabled = False
-            mensaje("Grabando… máximo 30 segundos. Pulsa Detener cuando termines.")
-            page.run_task(limite_audio, estado["generacion_audio"])
-        except Exception:
-            estado["grabando"] = False
-            ocupado(False)
-            mensaje("No se pudo grabar. Permite el micrófono y utiliza localhost o HTTPS.")
-
-    async def parar_audio(e):
-        if not estado["grabando"] or estado["deteniendo"]: return
-        estado["deteniendo"] = True
-        detener.disabled = True
-        page.update()
-        try:
-            await grabadora.stop_recording()
-            # Permite recibir los últimos trozos enviados antes de finalizar la captura.
-            await asyncio.sleep(0.3)
-            estado["grabando"] = False
-            pcm = b"".join(estado["trozos"])
-            estado["trozos"] = []
-            pcm = validar_audio_pcm(pcm)
-            reservar()
-            mensaje("Transcribiendo…")
-            datos = await asyncio.to_thread(
-                ia_media,
-                'Transcribe literalmente la voz de este audio en su idioma original. No respondas preguntas, '
-                'no completes frases, no inventes temas y no describas sonidos. Si solo hay silencio, ruido, '
-                'música o voz ininteligible, hay_voz debe ser false y texto vacío. '
-                'Devuelve únicamente JSON con este formato: {"hay_voz":true,"texto":"palabras exactas que se oyen"}.',
-                pcm_a_wav(pcm), "audio/wav", "", True)
-            tema.value = validar_transcripcion(datos)
-            mensaje("Escribí lo que escuché en Tema o pregunta, arriba. Revísalo y pulsa Generar 5 preguntas.")
-        except (ValueError, RuntimeError) as error: mensaje(str(error))
-        except Exception: mensaje("No pudimos transcribir. Prueba una grabación más corta.")
-        finally:
-            estado["grabando"] = False
-            estado["deteniendo"] = False
-            ocupado(False)
-            detener.disabled = True
-            page.update()
+        if estado["ocupado"]: return
+        def recibir(texto):
+            tema.value = validar_entrada(texto)
+            mensaje("Tema dictado recibido. Revísalo y genera tus preguntas.")
+        token = crear_sesion("dictar", "", idioma.value, recibir, reservar)
+        await navegador.launch_url("/voz#" + token, web_only_window_name="quiz-voz")
+        mensaje("Abre la pestaña Voz, pulsa Grabar y al terminar envía el tema al quiz.")
 
     async def copiar(e):
         if not estado["exportacion"]: return mensaje("Primero juega un quiz.")
@@ -286,37 +234,31 @@ def vista(page):
     # R10: voz española/inglesa; solo se envía al servicio TTS el resultado educativo.
     async def hablar(e):
         if not estado["exportacion"]: return mensaje("Primero genera un quiz.")
-        try:
-            escuchar.disabled = True
-            mensaje("Preparando voz… el texto se enviará al servicio de lectura de Microsoft.")
-            voz = "en-US-AriaNeural" if idioma.value == "English" else "es-SV-LorenaNeural"
-            contenido = bytearray()
-            async for parte in edge_tts.Communicate(estado["exportacion"][:6000], voz).stream():
-                if parte["type"] == "audio": contenido.extend(parte["data"])
-            if not contenido: raise ValueError()
-            reproductor.src = bytes(contenido)
-            page.update()
-            await reproductor.play()
-            mensaje("Reproduciendo la pregunta o el resultado.")
-        except Exception:
-            mensaje("La lectura no está disponible ahora. Puedes seguir jugando y volver a intentarlo.")
-        finally:
-            escuchar.disabled = False
-            page.update()
+        token = crear_sesion("leer", estado["exportacion"][:6000], idioma.value)
+        await navegador.launch_url("/voz#" + token, web_only_window_name="quiz-voz")
+        mensaje("En la pestaña Voz pulsa Escuchar. Puedes pausar o detener la lectura.")
 
     def votar(valor):
         def guardar(e):
             if not estado["quiz"]: return mensaje("Primero genera un quiz.")
-            if estado["voto"] is not None: return mensaje("Ya opinaste sobre este quiz. Genera otro para volver a votar.")
+            anterior = estado["voto"]
+            if anterior == valor: return
+            if anterior is not None:
+                estado["positivos" if anterior else "negativos"] -= 1
             estado["voto"] = valor
             estado["positivos" if valor else "negativos"] += 1
+            util.content = "✓ Útil" if valor else "👍 Útil"
+            mejorable.content = "✓ Mejorable" if not valor else "👎 Mejorable"
+            opinion.value = "Tu opinión: " + ("útil. ¡Gracias!" if valor else "mejorable. Gracias por señalarlo.") + " Puedes cambiarla."
             actualizar_panel()
-            mensaje("Gracias. Tu voto se contó en esta sesión.")
+            mensaje("Opinión registrada en esta sesión.")
         return guardar
 
+    opinion = ft.Text("¿Te ayudaron estas preguntas? Valora la calidad del quiz.", color="#B7C8DE")
+    util = ft.Button("👍 Útil", on_click=votar(True))
+    mejorable = ft.Button("👎 Mejorable", on_click=votar(False))
     generar_boton = ft.Button("✦ Generar 5 preguntas", on_click=generar)
     micro = ft.Button("🎙 Dictar tema (voz a texto)", on_click=iniciar_audio)
-    detener = ft.Button("■ Detener", on_click=parar_audio, disabled=True)
     foto = ft.Button("▧ Elegir foto", on_click=cargar_foto)
     texto_boton = ft.Button("↥ Abrir .txt", on_click=cargar_texto)
     ocr = ft.Button("Leer texto de la foto", on_click=leer_foto)
@@ -325,16 +267,16 @@ def vista(page):
     controles_entrada = [tema, fuente, nivel, idioma, modo_demo, generar_boton, micro, foto, texto_boton, ocr, quitar]
     return ft.Container(width=900, content=ft.Column([
         ft.Text("APPLAB IA / EJERCICIO 19", size=12, color=CIAN),
-        ft.Text("∞ Quiz infinito", size=36, weight=ft.FontWeight.BOLD),
+        ft.Text("∞ Quiz infinito", size=42, weight=ft.FontWeight.BOLD),
         ft.Text("Convierte tu curiosidad en cinco preguntas.\nEscribe, dicta o añade una foto y un texto de estudio.\nPractica a tu ritmo: este juego no sustituye a tu docente.", color="#B7C8DE"),
         tarjeta([ft.Text("La IA puede equivocarse: verifica las respuestas. No subas personas, teléfonos, DUI ni contraseñas. El filtro de texto es orientativo y no garantiza detectar todos los datos sensibles.", color="#F8D888"),
-            ft.Text("Audio e imágenes se envían a Gemini al procesarlos. La voz de salida usa Microsoft. Revisa los archivos antes de enviarlos.", size=12)]),
-        modo_demo, tema, ft.Row([nivel, idioma], wrap=True),
-        ft.Row([micro, detener, foto, texto_boton], wrap=True),
-        adjunto, ft.Row([ocr, quitar], wrap=True), fuente, palabras,
+            ft.Text("Las fotos y grabaciones se procesan con Gemini. La lectura usa las voces de tu navegador. Revisa el contenido antes de enviarlo.", size=12)]),
+        tarjeta([ft.Text("01 / PREPARA TU RETO", color=CIAN, weight=ft.FontWeight.BOLD), ft.Text("¿Qué quieres aprender hoy?", size=25, weight=ft.FontWeight.BOLD), modo_demo, tema, ft.Row([nivel, idioma], wrap=True)]),
+        ft.Row([micro, foto, texto_boton], wrap=True),
+        tarjeta([ft.Text("Material de apoyo · opcional", size=19, weight=ft.FontWeight.BOLD), adjunto, ft.Row([ocr, quitar], wrap=True), fuente, palabras]),
         ft.Row([generar_boton, progreso], wrap=True), aviso, panel,
-        resultados, ft.Row([ft.Button("Copiar", on_click=copiar), ft.Button("Compartir", on_click=compartir), escuchar], wrap=True),
-        ft.Row([ft.Button("👍 Útil", on_click=votar(True)), ft.Button("👎 Mejorable", on_click=votar(False))], wrap=True),
+        ft.Divider(), ft.Text("02 / JUEGA Y REVISA", color=CIAN, weight=ft.FontWeight.BOLD), resultados, ft.Row([ft.Button("Copiar", on_click=copiar), ft.Button("Compartir", on_click=compartir), escuchar], wrap=True),
+        tarjeta([opinion, ft.Row([util, mejorable], wrap=True)]),
         ft.Divider(), ft.Text("Tus últimas cinco interacciones", size=19, color=CIAN), historial,
         ft.Text("El historial y los votos se pierden al cerrar la sesión. Demostración no equivale a una prueba de IA real.", size=12, color="#9DADC4")
     ], spacing=16, horizontal_alignment=ft.CrossAxisAlignment.STRETCH))
