@@ -83,15 +83,15 @@ class Reglas(unittest.TestCase):
     def test_503_prueba_otro_modelo_y_lo_recuerda(self):
         nuevo="https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
         ok=httpx.Response(200,json={"candidates":[{"content":{"parts":[{"text":"alternativa"}]}}]})
-        with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch.object(cliente,"_url_disponible",None), patch("ia.httpx.post",side_effect=[httpx.Response(503),httpx.Response(503),ok]) as enviar, patch("ia.descubrir_modelos",return_value=[nuevo]), patch("ia.time.sleep"):
+        with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch.object(cliente,"_url_disponible",None), patch("ia.httpx.post",side_effect=[httpx.Response(503),ok]) as enviar, patch("ia.descubrir_modelos",return_value=[nuevo]), patch("ia.time.sleep"):
             self.assertEqual(cliente.ia("x","y"),"alternativa")
-            self.assertEqual(enviar.call_count,3)
+            self.assertEqual(enviar.call_count,2)
             self.assertEqual(enviar.call_args.args[0],nuevo)
             self.assertEqual(cliente._url_disponible,nuevo)
     def test_503_no_reintenta_indefinidamente(self):
         with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch("ia.httpx.post",return_value=httpx.Response(503)) as enviar, patch("ia.descubrir_modelos",return_value=["https://uno","https://dos","https://tres"]), patch("ia.time.sleep"):
             with self.assertRaisesRegex(RuntimeError,"503"): cliente.ia("x","y")
-            self.assertEqual(enviar.call_count,4)
+            self.assertEqual(enviar.call_count,2)
     def test_cuota_no_se_reintenta(self):
         with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch("ia.httpx.post",return_value=httpx.Response(429)) as enviar:
             with self.assertRaisesRegex(RuntimeError,"429"): cliente.ia("x","y")
@@ -114,7 +114,7 @@ class Reglas(unittest.TestCase):
             self.assertEqual(enviar.call_count,2)
     def test_timeout_muestra_causa_correcta(self):
         with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch("ia.httpx.post",side_effect=httpx.ReadTimeout("simulado")), patch("ia.descubrir_modelos",return_value=[]), patch("ia.time.sleep"):
-            with self.assertRaisesRegex(RuntimeError,"tardó demasiado"): cliente.ia("x","y")
+            with self.assertRaisesRegex(RuntimeError,"tiempo de espera"): cliente.ia("x","y")
     def test_foto_se_reduce_y_se_conserva_valida(self):
         import io
         from PIL import Image
@@ -129,6 +129,20 @@ class Reglas(unittest.TestCase):
     def test_imagen_danada_rechazada(self):
         from multimedia import preparar_imagen
         with self.assertRaises(ValueError): preparar_imagen(b"no es una foto")
+    def test_razonamiento_rapido_adaptado_al_modelo(self):
+        pedido={"generationConfig":{"responseMimeType":"application/json"}}
+        self.assertEqual(cliente.configurar_generacion(pedido,"gemini-2.5-flash")["generationConfig"]["thinkingConfig"],{"thinkingBudget":0})
+        self.assertEqual(cliente.configurar_generacion(pedido,"gemini-3.1-flash-lite")["generationConfig"]["thinkingConfig"],{"thinkingLevel":"minimal"})
+        self.assertEqual(cliente.configurar_generacion(pedido,"gemini-3.8-flash")["generationConfig"]["thinkingConfig"],{"thinkingLevel":"low"})
+        self.assertNotIn("thinkingConfig",pedido["generationConfig"])
+    def test_timeout_no_encadena_otro_timeout(self):
+        with patch.dict("os.environ",{"GEMINI_API_KEY":"ficticia"}), patch("ia.httpx.post",side_effect=httpx.ReadTimeout("simulado")) as enviar:
+            with self.assertRaisesRegex(RuntimeError,"tiempo de espera"): cliente.ia("x","y")
+            self.assertEqual(enviar.call_count,1)
+    def test_catalogo_prefiere_lite_para_reducir_latencia(self):
+        catalogo=httpx.Response(200,json={"models":[{"name":"models/gemini-3.8-flash","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-3.1-flash-lite","supportedGenerationMethods":["generateContent"]}]})
+        with patch("ia.httpx.get",return_value=catalogo):
+            self.assertIn("flash-lite",cliente.descubrir_modelo("ficticia"))
     def test_ui_y_juego(self):
         from apps.quiz_infinito import vista
         class Pagina:

@@ -1,7 +1,7 @@
 """Cliente Gemini: la clave vive exclusivamente en el servidor."""
 import os, json, re, time, random, httpx
 from threading import Lock
-MODELO = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODELO = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent"
 _url_disponible = None
 _modelo_lock = Lock()
@@ -16,7 +16,7 @@ def descubrir_modelos(clave):
             parametros["pageToken"] = token
         respuesta = httpx.get(
             "https://generativelanguage.googleapis.com/v1beta/models",
-            headers={"x-goog-api-key": clave}, params=parametros, timeout=30)
+            headers={"x-goog-api-key": clave}, params=parametros, timeout=8)
         if respuesta.status_code != 200:
             raise RuntimeError(f"No pudimos consultar los modelos disponibles (código {respuesta.status_code}). Revisa tu proyecto en AI Studio.")
         try:
@@ -38,53 +38,56 @@ def descubrir_modelos(clave):
     def prioridad(nombre):
         version = re.search(r"gemini-(\d+)(?:\.(\d+))?", nombre)
         numeros = tuple(int(x or 0) for x in version.groups()) if version else (0, 0)
-        return ("preview" not in nombre and "exp" not in nombre, numeros, "lite" in nombre, nombre)
+        return ("preview" not in nombre and "exp" not in nombre, "lite" in nombre, numeros, nombre)
     ordenados = sorted(set(modelos), key=prioridad, reverse=True)
     return [f"https://generativelanguage.googleapis.com/v1beta/{m}:generateContent" for m in ordenados]
 
 def descubrir_modelo(clave):
     return descubrir_modelos(clave)[0]
 
+def configurar_generacion(pedido, direccion):
+    """Ajusta el razonamiento al modelo elegido, incluso después de un respaldo."""
+    configuracion = dict(pedido.get("generationConfig", {}))
+    if "gemini-2.5-flash" in direccion:
+        configuracion["thinkingConfig"] = {"thinkingBudget": 0}
+    elif re.search(r"gemini-3(?:\.|-)", direccion):
+        configuracion["thinkingConfig"] = {"thinkingLevel": "minimal" if "flash-lite" in direccion else "low"}
+    else:
+        configuracion.pop("thinkingConfig", None)
+    return {**pedido, "generationConfig": configuracion}
+
+
 def enviar_con_respaldo(direccion, pedido, clave):
-    """Reintentos acotados para errores transitorios y conexión interrumpida."""
+    """Máximo dos envíos. Un timeout termina la espera sin repetirla cuatro veces."""
     global _url_disponible
     transitorios = (500, 502, 503, 504)
-    ultima_respuesta = None
-    ultimo_error = None
-    def enviar(url):
-        nonlocal ultima_respuesta, ultimo_error
+    for intento in range(2):
         try:
-            # Las imágenes pueden tardar más al subir y al ser interpretadas.
             respuesta = httpx.post(
-                url, timeout=httpx.Timeout(connect=12, read=75, write=60, pool=12),
-                headers={"x-goog-api-key": clave}, json=pedido)
-            ultima_respuesta, ultimo_error = respuesta, None
+                direccion, timeout=httpx.Timeout(connect=5, read=22, write=10, pool=5),
+                headers={"x-goog-api-key": clave}, json=configurar_generacion(pedido, direccion))
+        except httpx.TimeoutException:
+            raise
+        except (httpx.NetworkError, httpx.RemoteProtocolError):
+            if intento: raise
+            time.sleep(0.3)
+            continue
+        if respuesta.status_code == 200:
+            _url_disponible = direccion
             return respuesta
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as error:
-            ultimo_error = error
-            return None
-    respuesta = enviar(direccion)
-    if respuesta is None or respuesta.status_code in transitorios:
-        time.sleep(1 + random.uniform(0, 0.3))
-        respuesta = enviar(direccion)
-    if respuesta is None or respuesta.status_code in transitorios:
+        if intento or respuesta.status_code not in transitorios + (404, 410):
+            return respuesta
         try:
-            alternativas = [url for url in descubrir_modelos(clave) if url != direccion][:2]
+            alternativas = [url for url in descubrir_modelos(clave) if url != direccion]
         except (RuntimeError, httpx.HTTPError):
             alternativas = []
-        for numero, alternativa in enumerate(alternativas):
-            time.sleep(2 ** (numero + 1) + random.uniform(0, 0.3))
-            respuesta = enviar(alternativa)
-            if respuesta is not None and respuesta.status_code == 200:
-                _url_disponible = alternativa
-                break
-            if respuesta is not None and respuesta.status_code not in transitorios + (404, 410):
-                break
-    if respuesta is not None:
-        return respuesta
-    if ultimo_error is not None:
-        raise ultimo_error
-    return ultima_respuesta
+        if alternativas:
+            direccion = alternativas[0]
+        elif respuesta.status_code in (404, 410):
+            return respuesta
+        time.sleep(0.3)
+    return respuesta
+
 
 def solicitar(partes, como_json=False):
     global _url_disponible
@@ -92,18 +95,11 @@ def solicitar(partes, como_json=False):
     if not clave:
         raise RuntimeError("Falta la clave de IA. Configura GEMINI_API_KEY en el servidor.")
     try:
-        pedido = {"contents": [{"parts": partes}], "generationConfig": {"responseMimeType": "application/json"} if como_json else {}}
+        pedido = {"contents": [{"parts": partes}], "generationConfig": {"maxOutputTokens": 2400, **({"responseMimeType": "application/json"} if como_json else {})}}
         direccion = _url_disponible or URL
         r = enviar_con_respaldo(direccion, pedido, clave)
-        if r.status_code in (404, 410):
-            with _modelo_lock:
-                if _url_disponible is None or _url_disponible == direccion:
-                    _url_disponible = descubrir_modelo(clave)
-                direccion = _url_disponible
-            # Solo reintenta una vez por modelo inexistente; no reintenta cuotas ni errores de clave.
-            r = enviar_con_respaldo(direccion, pedido, clave)
     except httpx.TimeoutException:
-        raise RuntimeError("Google tardó demasiado en responder, incluso después de reintentar. Tu entrada se conserva; vuelve a probar en un momento.") from None
+        raise RuntimeError("Google superó el tiempo de espera. Tu entrada se conserva; vuelve a probar. No se encadenarán esperas de varios minutos.") from None
     except httpx.ConnectError:
         raise RuntimeError("No pudimos conectar con Google. Revisa internet, VPN o restricciones de la red; también puede fallar la conexión segura.") from None
     except httpx.HTTPError:

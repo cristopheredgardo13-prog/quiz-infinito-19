@@ -9,6 +9,14 @@ pinned: false
 ---
 # Quiz infinito
 
+## Rapidez y dictado · 29 de octubre
+
+El modelo predeterminado es `gemini-3.1-flash-lite`; el catálogo de respaldo prioriza Flash-Lite. El razonamiento se configura en mínimo (Flash-Lite 3.x), bajo (otros Flash 3.x) o desactivado (Flash 2.5). Se limita la salida a 2400 tokens y se solicitan explicaciones de una frase. Como máximo se realizan dos envíos; un timeout no se repite automáticamente. Cada respuesta tiene 22 segundos de espera de lectura. La velocidad real depende de Google y del arranque del servidor gratuito.
+
+El dictado muestra cronómetro y una vista previa reproducible de la grabación. Al detener, transcribe y escribe automáticamente el tema reconocido en el quiz para revisarlo antes de generar. Si falla conserva el audio y permite reintentarlo. La transcripción del servidor tiene un límite visible de 40 segundos; no permite duplicar una solicitud que siga activa. Si el navegador ofrece SpeechRecognition aparece un botón adicional de dictado rápido; depende del servicio de voz del navegador y puede no funcionar en Brave. En ese caso usa Grabar (Gemini).
+
+Comprobación local: 46 pruebas Python y dos escenarios del flujo de grabación con eventos simulados (palabra Psicología y error conservando audio). Estos escenarios no equivalen a una prueba del micrófono físico.
+
 ## Versión publicada y mejoras del 28 de octubre
 
 App: https://quiz-infinito-19.onrender.com/ (Python y Flet en Render).
@@ -391,5 +399,5 @@ Entrega: devuelve completos los archivos que deban cambiar y enumera las depende
 
 
 ## Recuperación ante saturación
-Ante errores 500, 502, 503 o 504 la app espera brevemente, reintenta una vez y puede probar hasta dos modelos Flash alternativos del catálogo oficial. Cada envío tiene un tiempo máximo de lectura de 75 segundos. No reintenta automáticamente errores de permisos ni cuota. Se verificaron la recuperación, el cambio de modelo y el límite de intentos con respuestas simuladas. La disponibilidad real depende de Google.
+Ante errores 500, 502, 503 o 504 la app puede probar una alternativa del catálogo oficial, con un máximo total de dos envíos. Cada envío tiene un tiempo máximo de lectura de 22 segundos. No reintenta automáticamente errores de permisos ni cuota. Se verificaron la recuperación, el cambio de modelo y el límite de intentos con respuestas simuladas. La disponibilidad real depende de Google.
 

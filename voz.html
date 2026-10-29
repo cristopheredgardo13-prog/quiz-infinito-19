@@ -2,21 +2,105 @@
 <title>Voz · Quiz infinito</title>
 <style>body{margin:0;background:#08111f;color:#e7eef8;font:17px system-ui}main{max-width:680px;margin:5vh auto;padding:28px}small{color:#35e1e8;letter-spacing:2px}h1{font-size:38px}section{background:#12243b;border-radius:24px;padding:24px;margin:24px 0}button,a{font:inherit;border:0;border-radius:12px;padding:14px 20px;margin:5px;background:#35e1e8;color:#08111f;cursor:pointer}button:disabled{opacity:.4}textarea{box-sizing:border-box;width:100%;min-height:170px;background:#08111f;color:#fff;border:1px solid #547088;border-radius:12px;padding:16px;font:inherit}#estado{color:#9cebd1;white-space:pre-wrap}label{display:block;margin:15px 0}select{font:inherit;max-width:100%}.hidden{display:none}p{line-height:1.6}</style>
 <main><small>QUIZ INFINITO / VOZ</small><h1 id="titulo">Preparando controles…</h1><p id="estado" role="status" aria-live="polite"></p>
-<section id="dictar" class="hidden"><p>Graba tu tema durante un máximo de 30 segundos. La grabación se envía a Gemini al detenerla. Después podrás corregir el texto antes de enviarlo al quiz.</p><button id="grabar">🎙 Grabar</button><button id="detener" disabled>■ Detener y transcribir</button><label for="tema">Revisa lo que dijiste</label><textarea id="tema" maxlength="500"></textarea><button id="enviar">Enviar tema al quiz</button><p>Al enviarlo, regresa a la pestaña del quiz y pulsa Generar 5 preguntas.</p></section>
+<section id="dictar" class="hidden"><p>Graba tu tema durante un máximo de 30 segundos. La grabación se envía a Gemini al detenerla. El tema reconocido aparecerá aquí y en el quiz; revísalo antes de generar preguntas. Si usas Dictado rápido, el reconocimiento depende del servicio de voz de tu navegador.</p><button id="grabar">🎙 Grabar</button><button id="detener" disabled>■ Detener y transcribir</button><button id="rapido" class="hidden">Dictado rápido del navegador</button><p id="reloj" aria-live="off"></p><audio id="muestra" controls class="hidden"></audio><button id="reintentar" class="hidden">Volver a transcribir esta grabación</button><label for="tema">Revisa lo que dijiste</label><textarea id="tema" maxlength="500"></textarea><button id="enviar">Enviar tema al quiz</button><p>Al enviarlo, regresa a la pestaña del quiz y pulsa Generar 5 preguntas.</p></section>
 <section id="leer" class="hidden"><label for="voces">Voz del dispositivo</label><select id="voces"></select><p><button id="escuchar">▶ Escuchar</button><button id="pausar">Pausar / continuar</button><button id="callar">■ Detener</button></p><p id="lectura"></p><p>La lectura usa las voces que ofrece tu navegador o dispositivo.</p></section><p>Puedes cerrar esta pestaña y volver al quiz cuando termines.</p></main>
 <script>
 const $=id=>document.getElementById(id), token=location.hash.slice(1), api='/api/voz/'+encodeURIComponent(token);
-let config,rec,stream,timer,chunks=[],utterance;
+let config,rec,stream,timer,chunks=[],utterance,contador,grabacion,urlAudio,reconocimiento,dictadoFinal="",transcribiendo=false,inicio;
 window.addEventListener('hashchange',()=>location.reload());
 function estado(t){$('estado').textContent=t}
-async function peticion(path,options){const r=await fetch(api+path,options);const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:'No se pudo completar la operación.');return d}
-function soltar(){clearTimeout(timer);if(stream)stream.getTracks().forEach(t=>t.stop());$('grabar').disabled=false;$('detener').disabled=true}
-$('grabar').onclick=async()=>{try{if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw Error('Usa Chrome, Edge o Safari actualizado y permite el micrófono.');$('grabar').disabled=true;stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});chunks=[];const mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));rec=new MediaRecorder(stream,mime?{mimeType:mime}:{});rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};rec.onerror=()=>{soltar();estado('Falló el micrófono. Comprueba el dispositivo seleccionado en el navegador.')};rec.onstop=async()=>{soltar();$('grabar').disabled=true;estado('Transcribiendo con Gemini…');try{const blob=new Blob(chunks,{type:rec.mimeType});const d=await peticion('/audio',{method:'POST',headers:{'Content-Type':blob.type},body:blob});$('tema').value=d.texto;estado('Revisa el texto. Si está bien, pulsa Enviar tema al quiz.')}catch(e){estado(e.message)}finally{$('grabar').disabled=false;chunks=[]}};rec.start();$('detener').disabled=false;estado('Grabando… habla con claridad y pulsa Detener.');timer=setTimeout(()=>{if(rec.state==='recording')rec.stop()},30000)}catch(e){soltar();estado(e.name==='NotAllowedError'?'Permite el micrófono en el icono de permisos junto a la dirección y vuelve a pulsar Grabar.':e.message)}};
-$('detener').onclick=()=>{if(rec?.state==='recording')rec.stop()};
-$('enviar').onclick=async()=>{try{await peticion('/texto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto:$('tema').value})});estado('✓ Tema enviado. Regresa a la pestaña del quiz.')}catch(e){estado(e.message)}};
+async function peticion(path,options={}) {
+  const controller=new AbortController();
+  const limite=setTimeout(()=>controller.abort(),55000);
+  try {
+    const r=await fetch(api+path,{...options,signal:controller.signal});
+    const raw=await r.text();
+    let d;try{d=JSON.parse(raw)}catch{throw Error('El servidor no respondió correctamente. Conservamos el texto y la grabación; vuelve a intentar.')}
+    if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:'No se pudo completar la operación.');
+    return d;
+  } catch(e) {
+    if(e.name==='AbortError')throw Error('La transcripción tardó demasiado. Tu grabación sigue disponible abajo; pulsa Volver a transcribir.');
+    if(e instanceof TypeError)throw Error('Se interrumpió la conexión. Tu grabación sigue disponible; vuelve a intentar.');
+    throw e;
+  } finally {clearTimeout(limite)}
+}
+function soltar() {
+  clearTimeout(timer);clearInterval(contador);
+  stream?.getTracks().forEach(t=>t.stop());
+  $('grabar').disabled=false;$('rapido').disabled=false;$('detener').disabled=true;
+}
+function cronometro(texto) {
+  inicio=Date.now();clearInterval(contador);
+  const dibujar=()=>{$('reloj').textContent=texto+' · '+Math.floor((Date.now()-inicio)/1000)+' s'};
+  dibujar();contador=setInterval(dibujar,1000);
+}
+async function enviarTema() {
+  const texto=$('tema').value.trim();
+  if(!texto)throw Error('No hay texto reconocido todavía. Graba de nuevo o escribe el tema.');
+  await peticion('/texto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto})});
+  estado('✓ Tema escrito en el quiz: '+texto+'. Revísalo y pulsa Generar 5 preguntas en la otra pestaña.');
+}
+async function transcribir() {
+  if(transcribiendo||!grabacion)return;
+  transcribiendo=true;$('grabar').disabled=true;$('rapido').disabled=true;$('reintentar').disabled=true;
+  cronometro('Transcribiendo');estado('Audio recibido. Transcribiendo con Gemini en modo rápido…');
+  try {
+    const d=await peticion('/audio',{method:'POST',headers:{'Content-Type':grabacion.type},body:grabacion});
+    $('tema').value=d.texto;
+    estado('Transcripción lista: '+d.texto);
+    await enviarTema();
+  } catch(e) {estado(e.message)}
+  finally {clearInterval(contador);transcribiendo=false;$('grabar').disabled=false;$('rapido').disabled=false;$('reintentar').disabled=false}
+}
+$('grabar').onclick=async()=>{
+  try {
+    if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)throw Error('Usa Chrome, Edge o Safari actualizado y permite el micrófono.');
+    $('grabar').disabled=true;$('rapido').disabled=true;estado('Esperando permiso del micrófono…');
+    stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+    chunks=[];grabacion=null;
+    const mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(t=>MediaRecorder.isTypeSupported(t));
+    rec=new MediaRecorder(stream,mime?{mimeType:mime}:{});
+    rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+    rec.onerror=()=>{soltar();estado('Falló el micrófono. Comprueba el dispositivo seleccionado en los permisos del navegador.')};
+    rec.onstop=async()=>{
+      soltar();
+      grabacion=new Blob(chunks,{type:rec.mimeType||chunks[0]?.type||'audio/webm'});chunks=[];
+      if(grabacion.size<100)return estado('La grabación está vacía. Habla durante dos o tres segundos y vuelve a detener.');
+      if(urlAudio)URL.revokeObjectURL(urlAudio);urlAudio=URL.createObjectURL(grabacion);
+      $('muestra').src=urlAudio;$('muestra').classList.remove('hidden');$('reintentar').classList.remove('hidden');
+      await transcribir();
+    };
+    rec.start(250);$('detener').disabled=false;
+    cronometro('Grabando · máximo 30 s');estado('🔴 Grabando. Di tu tema, por ejemplo Psicología, y pulsa Detener.');
+    timer=setTimeout(()=>{if(rec.state==='recording')rec.stop()},30000);
+  } catch(e) {soltar();estado(e.name==='NotAllowedError'?'Permite el micrófono en el icono junto a la dirección y vuelve a pulsar Grabar.':e.message)}
+};
+$('detener').onclick=()=>{
+  $('detener').disabled=true;estado('Grabación detenida. Preparando transcripción…');
+  if(reconocimiento){reconocimiento.stop();return}
+  if(rec?.state==='recording')rec.stop();
+  else estado('No hay una grabación activa. Pulsa Grabar y habla unos segundos.');
+};
+$('reintentar').onclick=transcribir;
+$('enviar').onclick=()=>enviarTema().catch(e=>estado(e.message));
+const Reconocer=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(Reconocer) {
+  $('rapido').classList.remove('hidden');
+  $('rapido').onclick=()=>{
+    if(transcribiendo)return;
+    dictadoFinal='';let fallo=false;
+    reconocimiento=new Reconocer();reconocimiento.lang=config.idioma==='English'?'en-US':'es-SV';
+    reconocimiento.continuous=false;reconocimiento.interimResults=true;
+    reconocimiento.onstart=()=>{$('grabar').disabled=true;$('rapido').disabled=true;$('detener').disabled=false;cronometro('Escuchando');estado('🔴 Escuchando con el servicio de voz del navegador…');timer=setTimeout(()=>reconocimiento?.stop(),30000)};
+    reconocimiento.onresult=e=>{let provisional='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)dictadoFinal+=e.results[i][0].transcript;else provisional+=e.results[i][0].transcript}$('tema').value=(dictadoFinal+provisional).slice(0,500)};
+    reconocimiento.onerror=e=>{fallo=true;estado(e.error==='not-allowed'?'Permite el micrófono para dictar.':'El dictado del navegador no está disponible ('+e.error+'). Usa el botón Grabar para transcribir con Gemini.');};
+    reconocimiento.onend=async()=>{reconocimiento=null;soltar();if(fallo)return;if(!dictadoFinal.trim())return estado('No se reconoció voz. Usa Grabar para probar con Gemini.');$('tema').value=dictadoFinal.slice(0,500);try{await enviarTema()}catch(e){estado(e.message)}};
+    try{reconocimiento.start()}catch(e){reconocimiento=null;soltar();estado('No se pudo iniciar el dictado rápido. Usa Grabar.')}
+  };
+}
 function voces(){if(!window.speechSynthesis)return;const v=speechSynthesis.getVoices().filter(x=>x.lang.startsWith(config.idioma==='English'?'en':'es'));$('voces').replaceChildren(...v.map(x=>{let o=document.createElement('option');o.value=x.voiceURI;o.textContent=x.name+' · '+x.lang;return o}));}
 $('escuchar').onclick=()=>{if(!window.speechSynthesis)return estado('Este navegador no tiene lectura de voz. Usa Chrome, Edge o Safari.');speechSynthesis.cancel();utterance=new SpeechSynthesisUtterance(config.texto);utterance.lang=config.idioma==='English'?'en-US':'es-SV';utterance.voice=speechSynthesis.getVoices().find(v=>v.voiceURI===$('voces').value)||null;utterance.onstart=()=>estado('Leyendo…');utterance.onend=()=>estado('Lectura terminada.');utterance.onerror=e=>{if(e.error!=='interrupted'&&e.error!=='canceled')estado('No se pudo reproducir esa voz. Prueba otra voz y revisa el volumen.')};speechSynthesis.speak(utterance)};
 $('pausar').onclick=()=>{if(window.speechSynthesis){if(speechSynthesis.paused){speechSynthesis.resume();estado('Leyendo…')}else{speechSynthesis.pause();estado('Lectura pausada.')}}};$('callar').onclick=()=>{window.speechSynthesis?.cancel();estado('Lectura detenida.')};
-window.addEventListener('pagehide',()=>{clearTimeout(timer);stream?.getTracks().forEach(t=>t.stop());window.speechSynthesis?.cancel()});
+window.addEventListener('pagehide',()=>{clearTimeout(timer);clearInterval(contador);reconocimiento?.abort();stream?.getTracks().forEach(t=>t.stop());window.speechSynthesis?.cancel()});
 (async()=>{try{config=await peticion('');$(config.modo).classList.remove('hidden');$('titulo').textContent=config.modo==='leer'?'Escucha y aprende':'Di qué quieres aprender';$('lectura').textContent=config.texto;estado(config.modo==='leer'?'Pulsa Escuchar para comenzar.':'Pulsa Grabar y permite el micrófono.');voces();if(window.speechSynthesis)speechSynthesis.onvoiceschanged=voces}catch(e){estado(e.message)}})();
 </script></html>

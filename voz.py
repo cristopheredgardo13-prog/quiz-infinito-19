@@ -71,12 +71,22 @@ def registrar_rutas(app: FastAPI):
         s["usos"] += 1
         try:
             if s["reservar"]: s["reservar"]()
-            resultado = await asyncio.to_thread(ia_media,
+            tarea = asyncio.create_task(asyncio.to_thread(ia_media,
                 'Transcribe literalmente la voz, sin responder ni completar. Si no hay voz inteligible devuelve '
                 '{"hay_voz":false,"texto":""}. En otro caso devuelve JSON {"hay_voz":true,"texto":"transcripción literal"}.',
-                bytes(contenido), mime, "", True)
+                bytes(contenido), mime, "", True))
+            resultado = await asyncio.wait_for(asyncio.shield(tarea), timeout=40)
             return {"texto": validar_transcripcion(resultado)}
+        except asyncio.TimeoutError:
+            raise HTTPException(504, "Google tardó demasiado en transcribir. Tu grabación sigue en la página; vuelve a intentarlo.")
         except (ValueError, RuntimeError) as error:
             raise HTTPException(400, str(error))
         finally:
-            s["ocupado"] = False
+            if "tarea" in locals() and not tarea.done():
+                # Un timeout de la página no debe permitir duplicar una llamada aún activa.
+                def liberar(t):
+                    s["ocupado"] = False
+                    if not t.cancelled(): t.exception()
+                tarea.add_done_callback(liberar)
+            else:
+                s["ocupado"] = False
