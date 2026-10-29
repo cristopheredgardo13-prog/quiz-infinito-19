@@ -47,3 +47,13 @@ La publicación alternativa en Render debe comunicarse al docente porque la guí
 - Dos compañeros deben probar la app y dejar comentarios reales.
 - La fecha final contiene una contradicción: el documento dice viernes 29; el 29 de octubre de 2026 es jueves. Confirmar la fecha con el docente.
 
+
+## Publicación del 28 de octubre de 2026
+La aplicación carga en https://quiz-infinito-19.onrender.com/ desde Render. La clave GEMINI_API_KEY ya está presente en el entorno según el modo inicial de la app. Se comprobó una generación real de Sistema solar con demostración desactivada: aparecieron cinco preguntas y al responder la primera el puntaje avanzó a 1 acierto en la pregunta 2. Evidencia local: ../quiz-publicado-ia-real.png. La generación tardó aproximadamente dos minutos. Gemini en producción está confirmado para texto; faltan las pruebas de multimedia y la prueba desde el celular.
+
+
+
+
+## Mejora de voz, diseño, revisión y votos · 28 de octubre
+
+43 pruebas automatizadas locales pasan. Se verificó en navegador un quiz demo con un error: 4/5, tarjeta roja para el error, verdes para los aciertos, soluciones y explicaciones. Se comprobó el envío de texto revisado desde la pestaña Voz al quiz y el marcado de voto. El dictado usa MediaRecorder y envía el formato real a Gemini; TTS usa speechSynthesis del navegador. Pendiente de prueba por el estudiante: micrófono físico, transcripción real y sonido en su dispositivo. Los prompts iniciales quedan como referencia histórica; no se inventaron intentos ni evidencias de voz.

@@ -9,13 +9,21 @@ pinned: false
 ---
 # Quiz infinito
 
-## Qué hacer ahora
+## Versión publicada y mejoras del 28 de octubre
 
-La publicación se está preparando para Render, conservando Python y Flet. Lee PUBLICAR_RENDER.md. La revisión real de requisitos y pruebas pendientes está en ESTADO_ENTREGA.md.
+App: https://quiz-infinito-19.onrender.com/ (Python y Flet en Render).
+La generación con Gemini real ya se comprobó. No necesitas CMD para usar este enlace.
 
-La app todavía no tiene un despliegue verificado: faltan inicio de sesión, creación del servicio y configuración privada de Gemini. No pegues la clave en este repositorio.
+- Nuevo diseño por secciones: prepara el reto, material opcional y juego/revisión.
+- Al terminar: puntaje, aciertos, errores, respuesta elegida, respuesta correcta y explicación; verde para correcta y rojo para repasar.
+- Útil y Mejorable valoran la calidad del quiz, no califican tus respuestas. La selección queda marcada y puede cambiarse sin duplicar el conteo. Los votos duran esta sesión.
+- Dictar abre una pestaña Voz: pulsa Grabar, permite el micrófono, Detener y transcribir, revisa el texto y pulsa Enviar tema al quiz. Regresa al quiz para generar preguntas. Captura nativa MediaRecorder de hasta 30 segundos; Gemini transcribe. El formato real WebM/MP4/OGG se conserva; no se interpreta audio comprimido como PCM.
+- Leer abre Voz: pulsa Escuchar. Incluye selector de voces del navegador, pausa y detener; no usa Edge TTS en el servidor. La disponibilidad de voces depende del dispositivo.
+- Si el navegador bloquea la ventana de voz, permite las ventanas emergentes solo para la app. Los enlaces de voz caducan en 10 minutos; vuelve a abrirlos desde el quiz.
 
-Ejercicio 19 de AppLab IA. Cinco preguntas con cuatro opciones, puntaje calculado en Python y quince ampliaciones implementadas.
+Verificación local: 43 pruebas automatizadas, juego con un fallo deliberado (4/5), revisión y cambio de voto comprobados en navegador; envío de texto revisado desde Voz a su sesión comprobado. Queda por comprobar el micrófono físico, la transcripción real y el sonido audible en el equipo/teléfono del estudiante. No se presentan pruebas simuladas como audio real.
+
+Los prompts de referencia que aparecen abajo describen la implementación inicial y se conservan como registro; para voz, los reemplaza técnicamente esta actualización. La guía pide evidencias y pruebas reales: consulta ESTADO_ENTREGA.md.
 
 ## Ejecutar en Windows
 Abre INICIAR.cmd. Instala dependencias locales la primera vez y abre http://localhost:7860.
@@ -39,12 +47,12 @@ La guía original pide Hugging Face Docker. El Space Static existente no ejecuta
 ## Capacidades
 R1 dictado máximo 30 segundos; R2 foto; R3 texto/archivo y conteo; R4 extracción de texto; R5 validación y progreso;
 R6 tarjetas; R7 últimas cinco interacciones; R8 nivel e idioma; R9 copiar y compartir;
-R10 lectura por Microsoft Edge TTS; R11 identidad; R12 límite de 20 llamadas a Gemini por sesión y errores amables;
+R10 lectura con voces del navegador; R11 identidad; R12 límite de 20 llamadas a Gemini por sesión y errores amables;
 R13 aviso y filtro local de texto; R14 votos por quiz; R15 foto con pregunta dictada.
 
 ## Privacidad y límites
 La clave solo vive en el servidor. Los archivos permanecen en memoria de la sesión.
-Audio e imágenes se envían a Google al procesarlos; la lectura envía texto educativo a Microsoft.
+Audio e imágenes se envían a Google al procesarlos; la lectura usa las voces del navegador o dispositivo.
 El filtro de texto reconoce patrones habituales de teléfonos salvadoreños, DUI, correos y contraseñas etiquetadas.
 No detecta todas las contraseñas ni datos personales dentro de archivos multimedia: revisa su contenido antes de enviarlo.
 El límite por sesión es educativo, no una defensa contra abuso de un servicio público.
@@ -383,5 +391,5 @@ Entrega: devuelve completos los archivos que deban cambiar y enumera las depende
 
 
 ## Recuperación ante saturación
-Ante errores 500, 502, 503 o 504 la app espera brevemente, reintenta una vez y puede probar hasta dos modelos Flash alternativos del catálogo oficial. Cada envío tiene un tiempo máximo de espera de 40 segundos. No reintenta automáticamente errores de permisos ni cuota. Se verificaron la recuperación, el cambio de modelo y el límite de intentos con respuestas simuladas. La disponibilidad real depende de Google.
+Ante errores 500, 502, 503 o 504 la app espera brevemente, reintenta una vez y puede probar hasta dos modelos Flash alternativos del catálogo oficial. Cada envío tiene un tiempo máximo de lectura de 75 segundos. No reintenta automáticamente errores de permisos ni cuota. Se verificaron la recuperación, el cambio de modelo y el límite de intentos con respuestas simuladas. La disponibilidad real depende de Google.
 

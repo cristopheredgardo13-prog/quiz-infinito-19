@@ -152,8 +152,11 @@ class Reglas(unittest.TestCase):
         for nombre in ["A. Python","B. El acceso al servicio","C. Python","D. Comprobar las reglas","A. Sí"]:
             boton(nombre).on_click(None)
         self.assertTrue(any("5/5" in str(getattr(c,"value","")) for c in todos(ui)))
-        boton("👍 Útil").on_click(None); boton("👍 Útil").on_click(None)
+        boton("👍 Útil").on_click(None); boton("✓ Útil").on_click(None)
         self.assertTrue(any("👍 1" in str(getattr(c,"value","")) for c in todos(ui)))
+        boton("👎 Mejorable").on_click(None)
+        self.assertTrue(any("👍 0 · 👎 1" in str(getattr(c,"value","")) for c in todos(ui)))
+        self.assertTrue(any("Respuesta correcta:" in str(getattr(c,"value","")) for c in todos(ui)))
 
 if __name__=="__main__": unittest.main(verbosity=2)
 
