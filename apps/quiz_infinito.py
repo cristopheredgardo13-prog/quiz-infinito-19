@@ -4,8 +4,9 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, parse_qs
 import flet as ft
-from voz import crear_sesion
+from voz import crear_sesion, enlazar_panel
 from ia import ia
 from multimedia import ia_media, preparar_imagen
 from logica import validar_entrada, validar_quiz, puntaje, demo, sensible
@@ -41,8 +42,16 @@ def vista(page):
     selector = ft.FilePicker()
     portapapeles = ft.Clipboard()
     compartir_servicio = ft.Share()
-    navegador = ft.UrlLauncher()
-    page.services.extend([selector, portapapeles, compartir_servicio, navegador])
+    page.services.extend([selector, portapapeles, compartir_servicio])
+
+    async def abrir_voz(token):
+        panel = None
+        for direccion in (getattr(page, "route", ""), getattr(page, "url", "")):
+            panel = parse_qs(urlsplit(direccion or "").query).get("panel", [None])[0]
+            if panel: break
+        if not panel:
+            raise ValueError("Recarga la página principal para activar el panel de voz.")
+        enlazar_panel(panel, token)
 
     def mensaje(texto):
         aviso.value = texto
@@ -215,8 +224,11 @@ def vista(page):
             tema.value = validar_entrada(texto)
             mensaje("Tema dictado recibido. Revísalo y genera tus preguntas.")
         token = crear_sesion("dictar", "", idioma.value, recibir, reservar)
-        await navegador.launch_url("/voz#" + token, web_only_window_name="quiz-voz")
-        mensaje("Abre la pestaña Voz, pulsa Grabar y al terminar envía el tema al quiz.")
+        try:
+            await abrir_voz(token)
+        except ValueError as error:
+            return mensaje(str(error))
+        mensaje("Usa el panel de micrófono. Al terminar, cierra el panel para continuar con el quiz.")
 
     async def copiar(e):
         if not estado["exportacion"]: return mensaje("Primero juega un quiz.")
@@ -238,8 +250,11 @@ def vista(page):
     async def hablar(e):
         if not estado["exportacion"]: return mensaje("Primero genera un quiz.")
         token = crear_sesion("leer", estado["exportacion"][:6000], idioma.value)
-        await navegador.launch_url("/voz#" + token, web_only_window_name="quiz-voz")
-        mensaje("En la pestaña Voz pulsa Escuchar. Puedes pausar o detener la lectura.")
+        try:
+            await abrir_voz(token)
+        except ValueError as error:
+            return mensaje(str(error))
+        mensaje("En el panel de lectura pulsa Escuchar. Puedes pausar, detener o cerrar el panel.")
 
     def votar(valor):
         def guardar(e):
