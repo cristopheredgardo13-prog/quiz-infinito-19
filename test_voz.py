@@ -5,6 +5,33 @@ from fastapi import FastAPI
 import voz
 
 class Voz(unittest.IsolatedAsyncioTestCase):
+    async def test_boton_micro_usa_el_panel_de_su_url(self):
+        from apps.quiz_infinito import vista
+        a = (await self.client.post("/api/panel")).json()["panel"]
+        class Pagina:
+            url = "http://test/app/?panel=" + a
+            def __init__(self): self.services = []
+            def update(self): pass
+        ui = vista(Pagina())
+        def controles(c):
+            yield c
+            for hijo in getattr(c, "controls", []): yield from controles(hijo)
+            hijo = getattr(c, "content", None)
+            if hijo is not None and not isinstance(hijo, str): yield from controles(hijo)
+        boton = next(c for c in controles(ui) if getattr(c, "content", None) == "🎙 Dictar tema (voz a texto)")
+        await boton.on_click(None)
+        token = (await self.client.get("/api/voz/"+a)).json()["texto"]
+        self.assertEqual((await self.client.get("/api/voz/"+token)).json()["modo"], "dictar")
+
+    async def test_panel_entrega_voz_solo_a_su_pagina(self):
+        a = (await self.client.post("/api/panel")).json()["panel"]
+        b = (await self.client.post("/api/panel")).json()["panel"]
+        token = voz.crear_sesion("leer", "Pregunta", "Español")
+        voz.enlazar_panel(a, token)
+        self.assertEqual((await self.client.get("/api/voz/"+a)).json()["texto"], token)
+        self.assertEqual((await self.client.get("/api/voz/"+b)).json()["texto"], "")
+        with self.assertRaises(ValueError): voz.enlazar_panel(token, a)
+
     async def asyncSetUp(self):
         voz.sesiones.clear()
         app = FastAPI()

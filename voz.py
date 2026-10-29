@@ -4,11 +4,19 @@ import time
 from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.responses import JSONResponse
 from multimedia import ia_media
 from logica import validar_entrada, validar_transcripcion
 import asyncio
 
 sesiones = {}
+
+def enlazar_panel(panel, token):
+    """Entrega la ventana solicitada únicamente al panel de esta sesión."""
+    s = sesiones.get(panel)
+    if not s or s["modo"] != "panel" or s["vence"] < time.monotonic():
+        raise ValueError("La conexión del panel caducó. Recarga la app para continuar.")
+    s["texto"] = token
 
 def crear_sesion(modo, texto, idioma, recibir=None, reservar=None):
     ahora = time.monotonic()
@@ -29,15 +37,22 @@ def registrar_rutas(app: FastAPI):
             raise HTTPException(410, "Esta ventana caducó. Ábrela otra vez desde el quiz.")
         return s
 
+    @app.post("/api/panel")
+    async def nuevo_panel():
+        return JSONResponse({"panel": crear_sesion("panel", "", "Español")}, headers={"Cache-Control": "no-store"})
+
     @app.get("/voz", response_class=HTMLResponse)
     async def pagina():
         return HTMLResponse(Path(__file__).with_name("voz.html").read_text(encoding="utf-8"),
-                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+                            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+                                     "Cross-Origin-Opener-Policy": "same-origin",
+                                     "Cross-Origin-Embedder-Policy": "require-corp"})
 
     @app.get("/api/voz/{token}")
     async def datos(token: str):
         s = obtener(token)
-        return {k: s[k] for k in ("modo", "texto", "idioma")}
+        if s["modo"] == "panel": s["vence"] = time.monotonic() + 600
+        return JSONResponse({k: s[k] for k in ("modo", "texto", "idioma")}, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/voz/{token}/texto")
     async def texto(token: str, request: Request):

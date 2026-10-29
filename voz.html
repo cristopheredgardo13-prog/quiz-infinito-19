@@ -2,12 +2,19 @@
 <title>Voz · Quiz infinito</title>
 <style>body{margin:0;background:#08111f;color:#e7eef8;font:17px system-ui}main{max-width:680px;margin:5vh auto;padding:28px}small{color:#35e1e8;letter-spacing:2px}h1{font-size:38px}section{background:#12243b;border-radius:24px;padding:24px;margin:24px 0}button,a{font:inherit;border:0;border-radius:12px;padding:14px 20px;margin:5px;background:#35e1e8;color:#08111f;cursor:pointer}button:disabled{opacity:.4}textarea{box-sizing:border-box;width:100%;min-height:170px;background:#08111f;color:#fff;border:1px solid #547088;border-radius:12px;padding:16px;font:inherit}#estado{color:#9cebd1;white-space:pre-wrap}label{display:block;margin:15px 0}select{font:inherit;max-width:100%}.hidden{display:none}p{line-height:1.6}</style>
 <main><small>QUIZ INFINITO / VOZ</small><h1 id="titulo">Preparando controles…</h1><p id="estado" role="status" aria-live="polite"></p>
-<section id="dictar" class="hidden"><p>Graba tu tema durante un máximo de 30 segundos. La grabación se envía a Gemini al detenerla. El tema reconocido aparecerá aquí y en el quiz; revísalo antes de generar preguntas. Si usas Dictado rápido, el reconocimiento depende del servicio de voz de tu navegador.</p><button id="grabar">🎙 Grabar</button><button id="detener" disabled>■ Detener y transcribir</button><button id="rapido" class="hidden">Dictado rápido del navegador</button><p id="reloj" aria-live="off"></p><audio id="muestra" controls class="hidden"></audio><button id="reintentar" class="hidden">Volver a transcribir esta grabación</button><label for="tema">Revisa lo que dijiste</label><textarea id="tema" maxlength="500"></textarea><button id="enviar">Enviar tema al quiz</button><p>Al enviarlo, regresa a la pestaña del quiz y pulsa Generar 5 preguntas.</p></section>
-<section id="leer" class="hidden"><label for="voces">Voz del dispositivo</label><select id="voces"></select><p><button id="escuchar">▶ Escuchar</button><button id="pausar">Pausar / continuar</button><button id="callar">■ Detener</button></p><p id="lectura"></p><p>La lectura usa las voces que ofrece tu navegador o dispositivo.</p></section><p>Puedes cerrar esta pestaña y volver al quiz cuando termines.</p></main>
+<section id="dictar" class="hidden"><p>Graba tu tema durante un máximo de 30 segundos. La grabación se envía a Gemini al detenerla. El tema reconocido aparecerá aquí y en el quiz; revísalo antes de generar preguntas. Si usas Dictado rápido, el reconocimiento depende del servicio de voz de tu navegador.</p><button id="grabar">🎙 Grabar</button><button id="detener" disabled>■ Detener y transcribir</button><button id="rapido" class="hidden">Dictado rápido del navegador</button><p id="reloj" aria-live="off"></p><audio id="muestra" controls class="hidden"></audio><button id="reintentar" class="hidden">Volver a transcribir esta grabación</button><label for="tema">Revisa lo que dijiste</label><textarea id="tema" maxlength="500"></textarea><button id="enviar">Enviar tema al quiz</button><p>Al enviarlo, cierra este panel y pulsa Generar 5 preguntas.</p></section>
+<section id="leer" class="hidden"><label for="voces">Voz del dispositivo</label><select id="voces"></select><p><button id="escuchar">▶ Escuchar</button><button id="pausar">Pausar / continuar</button><button id="callar">■ Detener</button></p><p id="lectura"></p><p>La lectura usa las voces que ofrece tu navegador o dispositivo.</p></section><p>Usa Cerrar y volver al quiz cuando termines. Permanecerás en la misma página.</p></main>
 <script>
 const $=id=>document.getElementById(id), token=location.hash.slice(1), api='/api/voz/'+encodeURIComponent(token);
 let config,rec,stream,timer,chunks=[],utterance,contador,grabacion,urlAudio,reconocimiento,dictadoFinal="",transcribiendo=false,inicio;
 window.addEventListener('hashchange',()=>location.reload());
+window.addEventListener('message',e=>{
+  if(e.origin!==location.origin||e.source!==window.parent||e.data?.tipo!=='quiz:cerrar-voz')return;
+  clearTimeout(timer);clearInterval(contador);
+  if(reconocimiento){reconocimiento.onend=null;reconocimiento.onerror=null;reconocimiento.abort();reconocimiento=null;}
+  if(rec&&rec.state!=='inactive'){rec.onstop=null;rec.stop();}
+  soltar();window.speechSynthesis?.cancel();estado('Panel cerrado. Puedes volver a grabar o escuchar cuando quieras.');
+});
 function estado(t){$('estado').textContent=t}
 async function peticion(path,options={}) {
   const controller=new AbortController();
@@ -38,7 +45,7 @@ async function enviarTema() {
   const texto=$('tema').value.trim();
   if(!texto)throw Error('No hay texto reconocido todavía. Graba de nuevo o escribe el tema.');
   await peticion('/texto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto})});
-  estado('✓ Tema escrito en el quiz: '+texto+'. Revísalo y pulsa Generar 5 preguntas en la otra pestaña.');
+  estado('✓ Tema escrito en el quiz: '+texto+'. Revísalo y pulsa Generar 5 preguntas al cerrar este panel.');
 }
 async function transcribir() {
   if(transcribiendo||!grabacion)return;
@@ -102,5 +109,5 @@ function voces(){if(!window.speechSynthesis)return;const v=speechSynthesis.getVo
 $('escuchar').onclick=()=>{if(!window.speechSynthesis)return estado('Este navegador no tiene lectura de voz. Usa Chrome, Edge o Safari.');speechSynthesis.cancel();utterance=new SpeechSynthesisUtterance(config.texto);utterance.lang=config.idioma==='English'?'en-US':'es-SV';utterance.voice=speechSynthesis.getVoices().find(v=>v.voiceURI===$('voces').value)||null;utterance.onstart=()=>estado('Leyendo…');utterance.onend=()=>estado('Lectura terminada.');utterance.onerror=e=>{if(e.error!=='interrupted'&&e.error!=='canceled')estado('No se pudo reproducir esa voz. Prueba otra voz y revisa el volumen.')};speechSynthesis.speak(utterance)};
 $('pausar').onclick=()=>{if(window.speechSynthesis){if(speechSynthesis.paused){speechSynthesis.resume();estado('Leyendo…')}else{speechSynthesis.pause();estado('Lectura pausada.')}}};$('callar').onclick=()=>{window.speechSynthesis?.cancel();estado('Lectura detenida.')};
 window.addEventListener('pagehide',()=>{clearTimeout(timer);clearInterval(contador);reconocimiento?.abort();stream?.getTracks().forEach(t=>t.stop());window.speechSynthesis?.cancel()});
-(async()=>{try{config=await peticion('');$(config.modo).classList.remove('hidden');$('titulo').textContent=config.modo==='leer'?'Escucha y aprende':'Di qué quieres aprender';$('lectura').textContent=config.texto;estado(config.modo==='leer'?'Pulsa Escuchar para comenzar.':'Pulsa Grabar y permite el micrófono.');voces();if(window.speechSynthesis)speechSynthesis.onvoiceschanged=voces}catch(e){estado(e.message)}})();
+(async()=>{try{config=await peticion('');$(config.modo).classList.remove('hidden');$('titulo').textContent=config.modo==='leer'?'Escucha y aprende':'Di qué quieres aprender';$('lectura').textContent=config.texto;estado(config.modo==='leer'?'Pulsa Escuchar para comenzar.':'Pulsa Grabar y permite el micrófono.');voces();if(window.speechSynthesis)speechSynthesis.onvoiceschanged=voces;if(window.parent!==window)window.parent.postMessage({tipo:'quiz:voz-lista',modo:config.modo},location.origin)}catch(e){estado(e.message)}})();
 </script></html>

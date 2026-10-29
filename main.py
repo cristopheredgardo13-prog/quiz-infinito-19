@@ -15,9 +15,20 @@ if __name__ == "__main__":
     from flet_web.fastapi import FastAPI
     from flet_web.fastapi import app as flet_app
     from voz import registrar_rutas
+    from fastapi.responses import HTMLResponse
     app = FastAPI()
     registrar_rutas(app)
-    app.mount("/", flet_app(main, assets_dir=str(Path(__file__).parent / "assets")))
+
+    @app.get("/", response_class=HTMLResponse)
+    async def inicio():
+        return HTMLResponse(Path(__file__).with_name("inicio.html").read_text(encoding="utf-8"), headers={
+            "Cache-Control": "no-store",
+            "Cross-Origin-Opener-Policy": "same-origin",
+            "Cross-Origin-Embedder-Policy": "require-corp",
+            "Permissions-Policy": "microphone=(self)",
+        })
+
+    app.mount("/app", flet_app(main, assets_dir=str(Path(__file__).parent / "assets")))
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "7860")), access_log=False)
 
 

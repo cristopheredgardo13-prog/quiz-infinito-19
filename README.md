@@ -9,6 +9,12 @@ pinned: false
 ---
 # Quiz infinito
 
+## Voz integrada en la misma página · 29 de octubre
+
+Dictar tema y Leer pregunta en voz alta abren un panel superpuesto dentro del quiz. Cerrar y volver al quiz detiene la grabación activa o la lectura y conserva la pregunta y el puntaje. No se abren pestañas nuevas. La app Flet se monta en /app y la página principal administra el panel de voz; sus identificadores temporales separan las sesiones. Después de esta actualización recarga la página principal, no un enlace antiguo de /voz.
+
+48 pruebas Python pasan, incluidas la separación entre paneles y la apertura del micrófono desde la sesión correcta. Apertura y cierre de dictado y lectura comprobados visualmente en navegador local sin cambiar la URL principal.
+
 ## Rapidez y dictado · 29 de octubre
 
 El modelo predeterminado es `gemini-3.1-flash-lite`; el catálogo de respaldo prioriza Flash-Lite. El razonamiento se configura en mínimo (Flash-Lite 3.x), bajo (otros Flash 3.x) o desactivado (Flash 2.5). Se limita la salida a 2400 tokens y se solicitan explicaciones de una frase. Como máximo se realizan dos envíos; un timeout no se repite automáticamente. Cada respuesta tiene 22 segundos de espera de lectura. La velocidad real depende de Google y del arranque del servidor gratuito.
@@ -25,9 +31,9 @@ La generación con Gemini real ya se comprobó. No necesitas CMD para usar este 
 - Nuevo diseño por secciones: prepara el reto, material opcional y juego/revisión.
 - Al terminar: puntaje, aciertos, errores, respuesta elegida, respuesta correcta y explicación; verde para correcta y rojo para repasar.
 - Útil y Mejorable valoran la calidad del quiz, no califican tus respuestas. La selección queda marcada y puede cambiarse sin duplicar el conteo. Los votos duran esta sesión.
-- Dictar abre una pestaña Voz: pulsa Grabar, permite el micrófono, Detener y transcribir, revisa el texto y pulsa Enviar tema al quiz. Regresa al quiz para generar preguntas. Captura nativa MediaRecorder de hasta 30 segundos; Gemini transcribe. El formato real WebM/MP4/OGG se conserva; no se interpreta audio comprimido como PCM.
-- Leer abre Voz: pulsa Escuchar. Incluye selector de voces del navegador, pausa y detener; no usa Edge TTS en el servidor. La disponibilidad de voces depende del dispositivo.
-- Si el navegador bloquea la ventana de voz, permite las ventanas emergentes solo para la app. Los enlaces de voz caducan en 10 minutos; vuelve a abrirlos desde el quiz.
+- Dictar abre el panel de voz: pulsa Grabar, permite el micrófono, Detener y transcribir, revisa el texto y pulsa Enviar tema al quiz. Cierra el panel para generar preguntas. Captura nativa MediaRecorder de hasta 30 segundos; Gemini transcribe. El formato real WebM/MP4/OGG se conserva; no se interpreta audio comprimido como PCM.
+- Leer abre el panel de voz: pulsa Escuchar. Incluye selector de voces del navegador, pausa y detener; no usa Edge TTS en el servidor. La disponibilidad de voces depende del dispositivo.
+- Los controles de voz se usan dentro de la página principal. Si una sesión antigua caducó, recarga la app.
 
 Verificación local: 43 pruebas automatizadas, juego con un fallo deliberado (4/5), revisión y cambio de voto comprobados en navegador; envío de texto revisado desde Voz a su sesión comprobado. Queda por comprobar el micrófono físico, la transcripción real y el sonido audible en el equipo/teléfono del estudiante. No se presentan pruebas simuladas como audio real.
 

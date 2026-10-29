@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#08111f">
+<title>Quiz infinito · AppLab IA</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#08111f;color:#e7eef8;font:16px system-ui}
+#quiz{display:block;border:0;width:100%;height:100dvh}
+dialog{width:min(780px,96vw);max-width:96vw;max-height:94dvh;padding:0;border:1px solid #46627e;border-radius:20px;background:#08111f;color:inherit;box-shadow:0 24px 90px #0009}
+dialog::backdrop{background:#020812b8;backdrop-filter:blur(4px)}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:#12243b;border-bottom:1px solid #46627e}
+header strong{font-size:16px}button{border:0;border-radius:10px;background:#35e1e8;color:#08111f;font:600 14px system-ui;padding:12px 16px;cursor:pointer}
+#voz{display:block;width:100%;height:74dvh;border:0;background:#08111f}
+button:focus-visible{outline:3px solid white;outline-offset:3px}
+@media(max-width:480px){dialog{width:96vw;border-radius:14px}header{padding:10px}#voz{height:76dvh}}
+</style>
+<iframe id="quiz" title="Quiz infinito: temas, preguntas y resultados" allow="microphone; autoplay; clipboard-write; web-share"></iframe>
+<dialog id="panel" aria-labelledby="titulo-panel">
+  <header><strong id="titulo-panel">Controles de voz</strong><button id="cerrar" type="button">Cerrar y volver al quiz</button></header>
+  <iframe id="voz" name="quiz-voz" title="Micrófono y lectura en voz alta" allow="microphone; autoplay"></iframe>
+</dialog>
+<script>
+const panel=document.getElementById('panel'), voz=document.getElementById('voz');
+function cerrar(){voz.contentWindow.postMessage({tipo:'quiz:cerrar-voz'},location.origin);panel.close();}
+document.getElementById('cerrar').onclick=cerrar;
+panel.addEventListener('cancel',e=>{e.preventDefault();cerrar()});
+window.addEventListener('message',e=>{
+  if(e.origin!==location.origin||e.source!==voz.contentWindow||e.data?.tipo!=='quiz:voz-lista')return;
+  document.getElementById('titulo-panel').textContent=e.data.modo==='dictar'?'Dictar el tema':'Leer en voz alta';
+  if(!panel.open)panel.showModal();
+});
+let identidad, ultimaVoz='';
+async function consultar(){
+  try{
+    const r=await fetch('/api/voz/'+encodeURIComponent(identidad),{cache:'no-store'});
+    if(r.ok){const d=await r.json();if(d.texto&&d.texto!==ultimaVoz){ultimaVoz=d.texto;voz.src='/voz#'+encodeURIComponent(d.texto);if(!panel.open)panel.showModal();}}
+  }catch{}finally{setTimeout(consultar,1200)}
+}
+(async()=>{
+  try{
+    const r=await fetch('/api/panel',{method:'POST'});if(!r.ok)throw Error();
+    identidad=(await r.json()).panel;
+    document.getElementById('quiz').src='/app/?panel='+encodeURIComponent(identidad);
+    consultar();
+  }catch{document.body.textContent='No se pudo abrir el quiz. Recarga la página para intentarlo otra vez.';}
+})();
+</script>
+</html>
